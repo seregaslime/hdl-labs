@@ -34,9 +34,9 @@ always @ (posedge clk)
 task send_event(input event_type_t ev_type, input logic valid, input logic [7:0] data);
 begin
     @ (negedge clk);
-    ev.ev_type = ev_type;
-    ev.valid   = valid;
-    ev.data    = data;
+    {ev.person, ev.pay} = ev_type;
+    ev.valid = valid;
+    ev.data  = data;
     $display("t=%0d ns  событие: %s, valid = %b, data = %0d", $time, ev_type.name(), valid, data);
     @ (negedge clk);
     ev = '0;
@@ -54,26 +54,26 @@ begin
     #20;
     rstN = 1'b1;
 
-    // 1. оплата и проход: IDLE -> CHECK -> OPEN -> IDLE
-    send_event(EV_PAY, 1'b1, 8'd50);
+    // 1. человек оплатил и прошел: IDLE -> CHECK -> OPEN -> IDLE
+    send_event(EV_PERSON_PAID, 1'b1, 8'd50);
     #20;
-    send_event(EV_PASS, 1'b1, 8'd0);
+    send_event(EV_PERSON_NOT_PAID, 1'b1, 8'd0);
     #20;
 
-    // 2. недостаточная оплата: IDLE -> CHECK -> IDLE
-    send_event(EV_PAY, 1'b1, 8'd20);
+    // 2. человек оплатил недостаточно: IDLE -> CHECK -> IDLE
+    send_event(EV_PERSON_PAID, 1'b1, 8'd20);
     #20;
 
     // 3. недостоверное событие игнорируется: остаемся в IDLE
-    send_event(EV_PAY, 1'b0, 8'd50);
+    send_event(EV_PERSON_PAID, 1'b0, 8'd50);
     #20;
 
-    // 4. проход без оплаты: IDLE -> LOCKED -> (тайм-аут) -> IDLE
-    send_event(EV_PASS, 1'b1, 8'd0);
+    // 4. есть человек, и он не платил: IDLE -> LOCKED -> (тайм-аут) -> IDLE
+    send_event(EV_PERSON_NOT_PAID, 1'b1, 8'd0);
     #60;
 
-    // 5. оплата без прохода: IDLE -> CHECK -> OPEN -> (тайм-аут) -> IDLE
-    send_event(EV_PAY, 1'b1, 8'd100);
+    // 5. оплата есть, а человека нет: IDLE -> CHECK -> OPEN -> (тайм-аут) -> IDLE
+    send_event(EV_PAY_ONLY, 1'b1, 8'd100);
     #110;
 
     $finish;

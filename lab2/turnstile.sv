@@ -13,7 +13,7 @@ import turnstile_pkg::*;
 (
     input          clk,
     input          rstN,
-    input  event_t ev,          // событие: оплата или датчик прохода
+    input  event_t ev,          // событие: датчик прохода и признак оплаты
     output logic   gate_open,   // турникет открыт
     output logic   alarm,       // сигнал тревоги (блокировка)
     output state_t outp_state   // текущее состояние автомата
@@ -24,12 +24,10 @@ state_t     next_state;
 logic [7:0] paid;       // внесенная сумма
 logic [3:0] timer;      // счетчик тактов в текущем состоянии
 
-logic       pay_ev;     // достоверное событие "оплата"
-logic       pass_ev;    // достоверное событие "проход"
+event_type_t ev_kind;   // вид события (у недостоверного события - EV_NONE)
 
 assign outp_state = state;
-assign pay_ev     = ev.valid && (ev.ev_type == EV_PAY);
-assign pass_ev    = ev.valid && (ev.ev_type == EV_PASS);
+assign ev_kind    = event_type_t'({ev.person & ev.valid, ev.pay & ev.valid});
 
 // регистр состояния
 always_ff @ (posedge clk)
@@ -49,14 +47,12 @@ begin
     case (state)
         ST_IDLE:
         begin
-            if (pay_ev)
-            begin
-                next_state = ST_CHECK;      // пришла оплата
-            end
-            else if (pass_ev)
-            begin
-                next_state = ST_LOCKED;     // попытка пройти без оплаты
-            end
+            case (ev_kind)
+                EV_PERSON_PAID:     next_state = ST_CHECK;  // есть человек, и он платил
+                EV_PAY_ONLY:        next_state = ST_CHECK;  // оплата есть, человек еще не подошел
+                EV_PERSON_NOT_PAID: next_state = ST_LOCKED; // есть человек, и он не платил
+                default:            next_state = ST_IDLE;
+            endcase
         end
         ST_CHECK:
         begin
@@ -71,7 +67,7 @@ begin
         end
         ST_OPEN:
         begin
-            if (pass_ev)
+            if (ev_kind == EV_PERSON_PAID || ev_kind == EV_PERSON_NOT_PAID)
             begin
                 next_state = ST_IDLE;       // человек прошел
             end
@@ -103,7 +99,7 @@ always_ff @ (posedge clk)
     end
     else
     begin
-        if (state == ST_IDLE && pay_ev)
+        if (state == ST_IDLE && (ev_kind == EV_PERSON_PAID || ev_kind == EV_PAY_ONLY))
         begin
             paid <= ev.data;
         end
