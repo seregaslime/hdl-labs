@@ -42,6 +42,9 @@ int     fail_at_start;      // число ошибок к началу теку�
 string  test_name;
 count_t exp_count;          // ожидаемое значение счетчика проходов
 logic   half_way;           // привод развернулся, не открывшись полностью
+int     seed;               // начальное значение генератора (+seed=N)
+int     rnd_passed  = 0;    // случайные попытки: успешные проходы
+int     rnd_denied  = 0;    // случайные попытки: отказы
 
 // генерация такта с периодом 10 нс
 initial clk = 1'b0;
@@ -175,11 +178,45 @@ task automatic rejected_payment(input amount_t amount, input logic bad_parity);
     check(pass_count == exp_count, "изменился счетчик проходов");
 endtask
 
+// попытка прохода со случайной оплатой из диапазона 40..150:
+// при оплате не меньше цены человек проходит, иначе турникет блокируется
+task automatic pass_attempt(input int n);
+    amount_t amount;
+    amount = $urandom_range(40, 150);
+    if (amount >= PRICE)
+    begin
+        pass_transaction(amount);
+        wait_drive(DRV_CLOSED, DRIVE_TICKS + 3, "привод не закрылся после прохода");
+        rnd_passed++;
+        $display("            попытка %2d: оплата %3d -> проход               (pass_count = %0d)",
+                 n, amount, pass_count);
+    end
+    else
+    begin
+        rejected_payment(amount, 1'b0);
+        person_walk();                  // человек все равно пытается пройти
+        wait_fsm(ST_LOCKED, 3, "проход с недостаточной оплатой не заблокирован");
+        check(alarm, "нет сигнала тревоги");
+        wait_fsm(ST_IDLE, LOCK_TICKS + 2, "блокировка не закончилась");
+        check(pass_count == exp_count, "проход с недостаточной оплатой учтен счетчиком");
+        rnd_denied++;
+        $display("            попытка %2d: оплата %3d -> отказ, блокировка    (pass_count = %0d)",
+                 n, amount, pass_count);
+    end
+endtask
+
 // ---------------- сценарии ----------------
 initial
 begin
     $dumpfile("lab3.vcd");
     $dumpvars(0, tb);
+
+    // начальное значение генератора можно задать при запуске: vvp lab3_sim +seed=N
+    if ($value$plusargs("seed=%d", seed))
+    begin
+        $display("seed = %0d", seed);
+        void'($urandom(seed));
+    end
 
     rst_n         = 1'b0;
     person_sensor = 1'b0;
@@ -273,6 +310,17 @@ begin
     begin_test("восстановление работы после сброса");
     pass_transaction(8'd70);
     wait_drive(DRV_CLOSED, DRIVE_TICKS + 3, "привод не закрылся после прохода");
+    end_test();
+
+    begin_test("20 попыток прохода со случайной оплатой 40..150");
+    begin
+        count_t count_before;
+        count_before = pass_count;
+        for (int n = 1; n <= 20; n++)
+            pass_attempt(n);
+        check(pass_count == count_before + rnd_passed, "счетчик не совпадает с числом проходов");
+        $display("            проходов: %0d, отказов: %0d", rnd_passed, rnd_denied);
+    end
     end_test();
 
     $display("------------------------------------------------------------");
